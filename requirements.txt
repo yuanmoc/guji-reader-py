@@ -1,0 +1,6 @@
+PySide6
+paddleocr
+PyMuPDF
+openai
+requests
+markdown

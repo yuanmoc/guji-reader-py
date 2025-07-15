@@ -1,0 +1,6 @@
+.idea
+.git
+ocr_results
+*.pdf
+config.json
+logs
