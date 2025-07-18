@@ -1,16 +1,24 @@
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QFileDialog, QMessageBox, QLabel, QHBoxLayout, QTextEdit, QTabWidget, QWidget, QScrollArea, QGroupBox, QSizePolicy
-from PySide6.QtCore import Qt
+import sys
+
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QFileDialog, QMessageBox, \
+    QLabel, QHBoxLayout, QTextEdit, QTabWidget, QWidget, QGroupBox, QApplication
+from PySide6.QtCore import Qt, QProcess
 from core.config_manager import AppConfig
 from core.global_state import GlobalState
 from PySide6.QtWidgets import QCheckBox, QComboBox
 from PySide6.QtGui import QFont
+
+from core.ocr_client import OcrClient
+from core.openai_client import OpenAIClient
 from core.utils.logger import info, warning
+
 
 class SettingsDialog(QDialog):
     """
     应用“更多设置”弹窗对话框。
     支持基础参数、OCR、自动标点、白话文、古文解释等多标签页配置，支持配置保存。
     """
+
     def __init__(self, parent=None):
         """
         构造函数，初始化设置对话框。
@@ -100,7 +108,8 @@ class SettingsDialog(QDialog):
 
         self.textline_orientation_model_dir_edit = QLineEdit()
         self.textline_orientation_model_dir_btn = QPushButton("选择文件夹")
-        self.textline_orientation_model_dir_btn.clicked.connect(lambda: self.choose_folder(self.textline_orientation_model_dir_edit))
+        self.textline_orientation_model_dir_btn.clicked.connect(
+            lambda: self.choose_folder(self.textline_orientation_model_dir_edit))
         file_layout2 = QHBoxLayout()
         file_layout2.addWidget(self.textline_orientation_model_dir_edit, 1)
         file_layout2.addWidget(self.textline_orientation_model_dir_btn)
@@ -108,7 +117,8 @@ class SettingsDialog(QDialog):
 
         self.text_detection_model_dir_edit = QLineEdit()
         self.text_detection_model_dir_btn = QPushButton("选择文件夹")
-        self.text_detection_model_dir_btn.clicked.connect(lambda: self.choose_folder(self.text_detection_model_dir_edit))
+        self.text_detection_model_dir_btn.clicked.connect(
+            lambda: self.choose_folder(self.text_detection_model_dir_edit))
         file_layout3 = QHBoxLayout()
         file_layout3.addWidget(self.text_detection_model_dir_edit, 1)
         file_layout3.addWidget(self.text_detection_model_dir_btn)
@@ -116,7 +126,8 @@ class SettingsDialog(QDialog):
 
         self.text_recognition_model_dir_edit = QLineEdit()
         self.text_recognition_model_dir_btn = QPushButton("选择文件夹")
-        self.text_recognition_model_dir_btn.clicked.connect(lambda: self.choose_folder(self.text_recognition_model_dir_edit))
+        self.text_recognition_model_dir_btn.clicked.connect(
+            lambda: self.choose_folder(self.text_recognition_model_dir_edit))
         file_layout4 = QHBoxLayout()
         file_layout4.addWidget(self.text_recognition_model_dir_edit, 1)
         file_layout4.addWidget(self.text_recognition_model_dir_btn)
@@ -129,13 +140,15 @@ class SettingsDialog(QDialog):
         group1_layout.addRow(QLabel("模型位置:"), file_layout1)
         name_layout1 = QHBoxLayout()
         name_layout1.addWidget(self.doc_unwarping_model_name_edit)
-        help_label1 = QLabel('<a href="https://paddlepaddle.github.io/PaddleOCR/main/version3.x/module_usage/text_image_unwarping.html">使用说明</a>')
+        help_label1 = QLabel(
+            '<a href="https://paddlepaddle.github.io/PaddleOCR/main/version3.x/module_usage/text_image_unwarping.html">使用说明</a>')
         help_label1.setOpenExternalLinks(True)
         name_layout1.addWidget(help_label1)
         group1_layout.addRow(QLabel("模型名称:"), name_layout1)
         # 新增：模型名称推荐（数组+循环）
         model_names1 = ["UVDoc"]
-        self.set_model_name(group1_layout, model_names1, self.doc_unwarping_model_name_edit, self.doc_unwarping_model_dir_edit)
+        self.set_model_name(group1_layout, model_names1, self.doc_unwarping_model_name_edit,
+                            self.doc_unwarping_model_dir_edit)
         group1.setLayout(group1_layout)
 
         # 文本行方向分类模块分组
@@ -145,13 +158,15 @@ class SettingsDialog(QDialog):
         group2_layout.addRow(QLabel("模型位置:"), file_layout2)
         name_layout2 = QHBoxLayout()
         name_layout2.addWidget(self.textline_orientation_model_name_edit)
-        help_label2 = QLabel('<a href="https://paddlepaddle.github.io/PaddleOCR/main/version3.x/module_usage/textline_orientation_classification.html">使用说明</a>')
+        help_label2 = QLabel(
+            '<a href="https://paddlepaddle.github.io/PaddleOCR/main/version3.x/module_usage/textline_orientation_classification.html">使用说明</a>')
         help_label2.setOpenExternalLinks(True)
         name_layout2.addWidget(help_label2)
         group2_layout.addRow(QLabel("模型名称:"), name_layout2)
         # 新增：模型名称推荐（数组+循环）
         model_names2 = ["PP-LCNet_x0_25_textline_ori", "PP-LCNet_x1_0_textline_ori"]
-        self.set_model_name(group2_layout, model_names2, self.textline_orientation_model_name_edit, self.textline_orientation_model_dir_edit)
+        self.set_model_name(group2_layout, model_names2, self.textline_orientation_model_name_edit,
+                            self.textline_orientation_model_dir_edit)
         group2.setLayout(group2_layout)
 
         # 文本检测模块分组
@@ -161,13 +176,15 @@ class SettingsDialog(QDialog):
         group3_layout.addRow(QLabel("模型位置:"), file_layout3)
         name_layout3 = QHBoxLayout()
         name_layout3.addWidget(self.text_detection_model_name_edit)
-        help_label3 = QLabel('<a href="https://paddlepaddle.github.io/PaddleOCR/main/version3.x/module_usage/text_detection.html">使用说明</a>')
+        help_label3 = QLabel(
+            '<a href="https://paddlepaddle.github.io/PaddleOCR/main/version3.x/module_usage/text_detection.html">使用说明</a>')
         help_label3.setOpenExternalLinks(True)
         name_layout3.addWidget(help_label3)
         group3_layout.addRow(QLabel("模型名称:"), name_layout3)
         # 新增：模型名称推荐（数组+循环）
         model_names3 = ["PP-OCRv5_server_det", "PP-OCRv5_mobile_det", "PP-OCRv4_server_det", "PP-OCRv4_mobile_det"]
-        self.set_model_name(group3_layout, model_names3, self.text_detection_model_name_edit, self.text_detection_model_dir_edit)
+        self.set_model_name(group3_layout, model_names3, self.text_detection_model_name_edit,
+                            self.text_detection_model_dir_edit)
         group3.setLayout(group3_layout)
 
         # 文本识别模块分组
@@ -177,13 +194,16 @@ class SettingsDialog(QDialog):
         group4_layout.addRow(QLabel("模型位置:"), file_layout4)
         name_layout4 = QHBoxLayout()
         name_layout4.addWidget(self.text_recognition_model_name_edit)
-        help_label4 = QLabel('<a href="https://paddlepaddle.github.io/PaddleOCR/main/version3.x/module_usage/text_recognition.html">使用说明</a>')
+        help_label4 = QLabel(
+            '<a href="https://paddlepaddle.github.io/PaddleOCR/main/version3.x/module_usage/text_recognition.html">使用说明</a>')
         help_label4.setOpenExternalLinks(True)
         name_layout4.addWidget(help_label4)
         group4_layout.addRow(QLabel("模型名称:"), name_layout4)
         # 新增：模型名称推荐（数组+循环）
-        model_names4 = ["PP-OCRv5_server_rec", "PP-OCRv5_mobile_rec", "PP-OCRv4_server_rec_doc", "PP-OCRv4_mobile_rec", "PP-OCRv4_server_rec", "en_PP-OCRv4_mobile_rec"]
-        self.set_model_name(group4_layout, model_names4, self.text_recognition_model_name_edit, self.text_recognition_model_dir_edit)
+        model_names4 = ["PP-OCRv5_server_rec", "PP-OCRv5_mobile_rec", "PP-OCRv4_server_rec_doc", "PP-OCRv4_mobile_rec",
+                        "PP-OCRv4_server_rec", "en_PP-OCRv4_mobile_rec"]
+        self.set_model_name(group4_layout, model_names4, self.text_recognition_model_name_edit,
+                            self.text_recognition_model_dir_edit)
         group4.setLayout(group4_layout)
 
         # 文本图像矫正、方向分类、检测、识别模块用Tab标签页显示，节约空间
@@ -222,16 +242,19 @@ class SettingsDialog(QDialog):
         desc_use_doc_unwarping = QLabel("不支持使用文档扭曲矫正模块，请先使用第三方工具处理")
         desc_use_doc_unwarping.setFont(desc_font)
         desc_use_doc_unwarping.setStyleSheet(desc_color)
-        desc_limit_type = QLabel("【短边】表示保证图像最短边不小于【文本检测的图像边长限制】，【长边】表示保证图像最长边不大于【文本检测的图像边长限制】。")
+        desc_limit_type = QLabel(
+            "【短边】表示保证图像最短边不小于【文本检测的图像边长限制】，【长边】表示保证图像最长边不大于【文本检测的图像边长限制】。")
         desc_limit_type.setFont(desc_font)
         desc_limit_type.setStyleSheet(desc_color)
-        desc_limit_side_len = QLabel("对于文本检测输入图像的边长限制，对于尺寸较大文本密集的图像，如果希望更精准的识别，应选用更大的尺寸，该参数与【文本检测的图像边长限制类型】\n配合使用。一般最大【长边】适合图像文字较大的场景，最小【短边】适合图像文字小且密集的文档场景使用。")
+        desc_limit_side_len = QLabel(
+            "对于文本检测输入图像的边长限制，对于尺寸较大文本密集的图像，如果希望更精准的识别，应选用更大的尺寸，该参数与【文本检测的图像边长限制类型】\n配合使用。一般最大【长边】适合图像文字较大的场景，最小【短边】适合图像文字小且密集的文档场景使用。")
         desc_limit_side_len.setFont(desc_font)
         desc_limit_side_len.setStyleSheet(desc_color)
         desc_det_thresh = QLabel("输出的概率图中，得分大于该阈值的像素点才会被认为是文字像素点，取值范围为0~1。")
         desc_det_thresh.setFont(desc_font)
         desc_det_thresh.setStyleSheet(desc_color)
-        desc_box_thresh = QLabel("检测结果边框内，所有像素点的平均得分大于该阈值时，该结果会被认为是文字区域，取值范围为0~1。如果出现漏检，可以适当调低该值。")
+        desc_box_thresh = QLabel(
+            "检测结果边框内，所有像素点的平均得分大于该阈值时，该结果会被认为是文字区域，取值范围为0~1。如果出现漏检，可以适当调低该值。")
         desc_box_thresh.setFont(desc_font)
         desc_box_thresh.setStyleSheet(desc_color)
         desc_unclip_ratio = QLabel("使用该方法对文字区域进行扩张，该值越大，扩张的面积越大。")
@@ -281,18 +304,18 @@ class SettingsDialog(QDialog):
         """
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        
+
         self.punctuate_model_edit = QLineEdit()
         self.punctuate_model_edit.setPlaceholderText("留空则使用默认模型")
         self.punctuate_system_prompt_edit = QTextEdit()
 
         form.addRow(QLabel("模型名称:"), self.punctuate_model_edit)
         form.addRow(QLabel("系统提示词:"), self.punctuate_system_prompt_edit)
-        
+
         layout.addLayout(form, 1)  # 添加拉伸因子
         return widget
 
@@ -303,18 +326,18 @@ class SettingsDialog(QDialog):
         """
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        
+
         self.vernacular_model_edit = QLineEdit()
         self.vernacular_model_edit.setPlaceholderText("留空则使用默认模型")
         self.vernacular_system_prompt_edit = QTextEdit()
 
         form.addRow(QLabel("模型名称:"), self.vernacular_model_edit)
         form.addRow(QLabel("系统提示词:"), self.vernacular_system_prompt_edit)
-        
+
         layout.addLayout(form, 1)  # 添加拉伸因子
         return widget
 
@@ -325,18 +348,18 @@ class SettingsDialog(QDialog):
         """
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        
+
         self.explain_model_edit = QLineEdit()
         self.explain_model_edit.setPlaceholderText("留空则使用默认模型")
         self.explain_system_prompt_edit = QTextEdit()
 
         form.addRow(QLabel("模型名称:"), self.explain_model_edit)
         form.addRow(QLabel("系统提示词:"), self.explain_system_prompt_edit)
-        
+
         layout.addLayout(form, 1)  # 添加拉伸因子
         return widget
 
@@ -360,7 +383,7 @@ class SettingsDialog(QDialog):
         self.api_key_edit.setText(config.api_key)
         self.model_name_edit.setText(config.model_name)
         self.storage_path_edit.setText(config.storage_dir)
-        
+
         # 加载OCR配置
         self.doc_unwarping_model_dir_edit.setText(config.doc_unwarping_model_dir)
         self.doc_unwarping_model_name_edit.setText(config.doc_unwarping_model_name)
@@ -384,14 +407,14 @@ class SettingsDialog(QDialog):
         self.text_det_box_thresh_edit.setText(str(config.text_det_box_thresh))
         self.text_det_unclip_ratio_edit.setText(str(config.text_det_unclip_ratio))
         self.text_rec_score_thresh_edit.setText(str(config.text_rec_score_thresh))
-        
+
         # 加载功能特定配置
         self.punctuate_model_edit.setText(config.punctuate_model_name)
         self.punctuate_system_prompt_edit.setText(config.punctuate_system_prompt)
-        
+
         self.vernacular_model_edit.setText(config.vernacular_model_name)
         self.vernacular_system_prompt_edit.setText(config.vernacular_system_prompt)
-        
+
         self.explain_model_edit.setText(config.explain_model_name)
         self.explain_system_prompt_edit.setText(config.explain_system_prompt)
 
@@ -439,13 +462,36 @@ class SettingsDialog(QDialog):
             explain_model_name=self.explain_model_edit.text().strip(),
             explain_system_prompt=self.explain_system_prompt_edit.toPlainText().strip()
         )
-        
+        # 检查OCR相关字段是否有变化
+        old_config = self.config_manager.config
+        ocr_fields = [
+            'doc_unwarping_model_dir', 'doc_unwarping_model_name',
+            'textline_orientation_model_dir', 'textline_orientation_model_name',
+            'text_detection_model_dir', 'text_detection_model_name',
+            'text_recognition_model_dir', 'text_recognition_model_name',
+            'use_doc_unwarping', 'use_textline_orientation',
+            'text_det_limit_type', 'text_det_limit_side_len',
+            'text_det_thresh', 'text_det_box_thresh',
+            'text_det_unclip_ratio', 'text_rec_score_thresh'
+        ]
+        ocr_changed = any(getattr(new_config, f) != getattr(old_config, f) for f in ocr_fields)
         # 通过配置管理器更新配置
         success, message = self.config_manager.update_config(new_config)
-        
+
         if success:
             info("设置已保存，配置已更新")
+            OpenAIClient().init_client()
+            if ocr_changed:
+                reply = QMessageBox.question(self, "提示",
+                                             "检测到OCR相关参数已修改，需重启应用以使新配置生效。是否立即重启应用？",
+                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if reply == QMessageBox.StandardButton.Yes:
+                    app_path = sys.executable
+                    args = sys.argv
+                    QProcess.startDetached(app_path, args)
+                    QApplication.quit()
+                    return
             self.accept()
         else:
             warning(f"设置保存失败: {message}")
-            QMessageBox.warning(self, "错误", message) 
+            QMessageBox.warning(self, "错误", message)

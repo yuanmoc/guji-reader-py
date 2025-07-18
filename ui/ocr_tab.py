@@ -1,63 +1,14 @@
-import numpy as np
+import os
+import uuid
+
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QTextEdit, QHBoxLayout, QListWidget, QListWidgetItem
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QHBoxLayout, QListWidget, QListWidgetItem
 from PySide6.QtCore import QThread, Signal
-from paddleocr import PaddleOCR
 from core.global_state import GlobalState
+from core.ocr_client import OcrClient
 from core.utils.ocr_data_util import OcrDataUtil
-from core.utils.logger import info, error
-
-# 新增全局单例
-_ocr_singleton = None
-
-def _on_config_changed(config):
-    """
-    配置变更时回调，重建 PaddleOCR 实例。
-    :param config: 最新AppConfig对象
-    """
-    global _ocr_singleton
-    _ocr_singleton = None
-    info("检测到配置变更，重建 PaddleOCR 实例")
-
-# 注册配置变更监听器（只注册一次）
-try:
-    GlobalState.config_manager.add_config_listener(_on_config_changed)
-except Exception as e:
-    error(f"注册OCR配置监听器失败: {e}")
-
-
-def get_ocr_singleton():
-    """
-    获取全局唯一的PaddleOCR实例，避免重复加载模型。
-    :return: PaddleOCR实例
-    """
-    from core.global_state import GlobalState
-    global _ocr_singleton
-    to_none = lambda v: None if v == '' else v
-    if _ocr_singleton is None:
-        config = GlobalState.get_config()
-        _ocr_singleton = PaddleOCR(
-            doc_unwarping_model_dir=to_none(config.doc_unwarping_model_dir),
-            doc_unwarping_model_name=config.doc_unwarping_model_name,
-            textline_orientation_model_dir=to_none(config.textline_orientation_model_dir),
-            textline_orientation_model_name=config.textline_orientation_model_name,
-            text_detection_model_dir=to_none(config.text_detection_model_dir),
-            text_detection_model_name=config.text_detection_model_name,
-            text_recognition_model_dir=to_none(config.text_recognition_model_dir),
-            text_recognition_model_name=config.text_recognition_model_name,
-
-            use_doc_orientation_classify=False,  # 文档方向
-            use_doc_unwarping=config.use_doc_unwarping,  # 文本图像矫正
-            use_textline_orientation=config.use_textline_orientation,  # 文本行方向分类模块
-            text_det_limit_side_len=config.text_det_limit_side_len,  # 文本检测的图像边长限制
-            text_det_limit_type=config.text_det_limit_type,  # 文本检测的边长度限制类型
-
-            text_det_thresh=config.text_det_thresh,
-            text_det_box_thresh=config.text_det_box_thresh,
-            text_det_unclip_ratio=config.text_det_unclip_ratio,
-            text_rec_score_thresh=config.text_rec_score_thresh,
-        )
-    return _ocr_singleton
+from core.utils.logger import info, error, warning
+from core.utils.path_util import get_user_store_path
 
 
 class OCRWorker(QThread):
@@ -68,15 +19,15 @@ class OCRWorker(QThread):
     result_signal = Signal(list)
     error_signal = Signal(str)
 
-    def __init__(self, image_data, width, height):  # image_path: 临时图片路径
+    def __init__(self, image_path, width, height):  # image_path: 临时图片路径
         """
         构造函数。
-        :param image_data: 临时图片路径/data
+        :param image_path: 临时图片路径/data
         :param width: 图片宽度
         :param height: 图片高度
         """
         super().__init__()
-        self.image_data = image_data
+        self.image_path = image_path
         self.width = width
         self.height = height
 
@@ -87,14 +38,21 @@ class OCRWorker(QThread):
         info("OCRWorker线程run方法进入")
         try:
             info(f"OCR线程启动，图片尺寸: {self.width}x{self.height}")
-            ocr = get_ocr_singleton()
+            ocr = OcrClient().get_ocr_client()
             # 对示例图像执行 OCR 推理
-            result = ocr.predict(input=self.image_data)
+            result = ocr.predict(input=self.image_path)
             self.result_signal.emit(result)
             info("OCR识别成功")
         except Exception as e:
             error(f"OCR识别失败: {e}")
             self.error_signal.emit(str(e))
+        # 自动清理临时图片
+        if os.path.exists(self.image_path):
+            try:
+                os.remove(self.image_path)
+                info(f"临时图片已删除: {self.image_path}")
+            except Exception as e:
+                warning(f"删除临时图片失败: {e}")
         info("OCRWorker线程run方法退出")
         self.deleteLater()
 
@@ -117,6 +75,8 @@ class OCRTabWidget(QWidget):
         # 当前选中的文本行索引
         self.selected_text_index = -1
         self.init_ui()
+        # 删除临时图片
+
 
     def init_ui(self):
         """
@@ -173,10 +133,9 @@ class OCRTabWidget(QWidget):
         page = self.pdf_viewer.pdf_doc.load_page(GlobalState.current_page)
         info(f"开始OCR，当前页码: {GlobalState.current_page}")
         pix = page.get_pixmap(matrix=None)
-
-        img_data = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-
-        self.worker = OCRWorker(img_data, pix.width, pix.height)
+        img_path = get_user_store_path("tmp", f"{str(uuid.uuid4())}.png")
+        pix.save(img_path)
+        self.worker = OCRWorker(img_path, pix.width, pix.height)
         self.worker.result_signal.connect(self.ocr_success)
         self.worker.error_signal.connect(self.ocr_fail)
         self.worker.start()

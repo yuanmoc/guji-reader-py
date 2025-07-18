@@ -4,3 +4,5 @@ ocr_results
 *.pdf
 config.json
 logs
+build
+dist

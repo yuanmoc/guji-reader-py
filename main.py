@@ -1,11 +1,12 @@
 import sys
 
 from PySide6 import QtCore
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QTabWidget, QSplitter, QToolButton, QStyle
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QTabWidget, QSplitter, QToolButton
 from PySide6.QtGui import QIcon
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, QObject, Slot
 from PySide6.QtGui import QDesktopServices
 
+from core.config_manager import ConfigManager
 from ui.pdf_viewer import PDFViewerWidget
 from ui.ocr_tab import OCRTabWidget
 from ui.proofread_tab import ProofreadTabWidget
@@ -15,13 +16,7 @@ from ui.explain_tab import ExplainTabWidget
 from ui.log_tab import LogTabWidget
 from core.global_state import GlobalState
 from core.utils.logger import info, error
-
-# 初始化全局状态
-try:
-    GlobalState.initialize()
-    info("应用启动，初始化全局状态")
-except Exception as e:
-    error(f"全局状态初始化失败: {e}")
+from core.utils.path_util import get_resource_path
 
 
 class MainWindow(QMainWindow):
@@ -75,7 +70,7 @@ class MainWindow(QMainWindow):
 
         # 悬浮GitHub按钮
         self.github_btn = QToolButton(self)
-        self.github_btn.setIcon(QIcon("ui/assets/github.svg"))
+        self.github_btn.setIcon(QIcon(get_resource_path("ui/assets/github.svg")))
         self.github_btn.setIconSize(QtCore.QSize(32, 32))
         self.github_btn.setToolTip("访问GitHub项目主页")
         self.github_btn.setStyleSheet(
@@ -129,13 +124,29 @@ class MainWindow(QMainWindow):
     def _move_github_btn(self):
         self.github_btn.move(self.width() - self.github_btn.width() - 10, 2)
 
+
+class ExitHandler(QObject):
+    """
+    应用程序退出触发
+    """
+
+    @Slot()
+    def on_about_to_quit(self):
+        ConfigManager().do_save_config()
+
+
 def main():
     """
     应用程序入口，启动Qt主事件循环。
     """
     try:
         app = QApplication(sys.argv)
-        app.setWindowIcon(QIcon("ui/assets/logo.png"))
+        app.setWindowIcon(QIcon(get_resource_path("ui/assets/logo.png")))
+
+        # 创建退出处理器并连接信号
+        exit_handler = ExitHandler()
+        app.aboutToQuit.connect(exit_handler.on_about_to_quit)
+
         window = MainWindow()
         window.show()
         info("主界面已显示，进入事件循环")

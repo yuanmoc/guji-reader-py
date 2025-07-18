@@ -1,13 +1,10 @@
 import logging
-import os
 from logging.handlers import RotatingFileHandler
 
 # 日志目录和文件
-LOG_DIR = os.path.join(os.getcwd(), 'logs')
-LOG_FILE = os.path.join(LOG_DIR, 'app.log')
+from core.utils.path_util import get_user_store_path
 
-# 确保日志目录存在
-os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = get_user_store_path('logs', 'app.log')
 
 # 日志格式
 LOG_FORMAT = '[%(asctime)s] [%(levelname)s] %(filename)s:%(lineno)d - %(message)s'

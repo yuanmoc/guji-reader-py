@@ -4,12 +4,7 @@ import threading
 
 from core.utils.numpy_encoder import NumpyEncoder
 from collections import OrderedDict
-from core.config_manager import (
-    ConfigManager, get_storage_dir, get_base_url, get_api_key, get_model_name,
-    get_punctuate_model_name, get_punctuate_system_prompt,
-    get_vernacular_model_name, get_vernacular_system_prompt,
-    get_explain_model_name, get_explain_system_prompt
-)
+from core.config_manager import ConfigManager
 from core.utils.logger import info, error
 
 
@@ -29,15 +24,6 @@ class GlobalState():
 
     # 配置管理器
     config_manager = ConfigManager()
-
-    @classmethod
-    def initialize(cls):
-        """
-        静态初始化方法，确保只初始化一次。
-        创建存储目录。
-        """
-        os.makedirs(get_storage_dir(), exist_ok=True)
-        info(f"存储目录已创建, {get_storage_dir()}")
 
     @classmethod
     def set_pdf_file(cls, file_path):
@@ -60,7 +46,6 @@ class GlobalState():
         # 新增：同步保存到配置
         config = cls.get_config()
         config.last_open_file = file_path
-        cls.update_config(config)
 
     @classmethod
     def set_page(cls, page_num):
@@ -73,7 +58,6 @@ class GlobalState():
         # 新增：同步保存到配置
         config = cls.get_config()
         config.last_open_page = page_num
-        cls.update_config(config)
 
     @classmethod
     def get_pdf_data(cls):
@@ -124,7 +108,7 @@ class GlobalState():
         pdf_data = cls.get_pdf_data()
         if pdf_data is not None and len(pdf_data) > 0:
             return
-        cache_path = os.path.join(get_storage_dir(), f"{cls.current_pdf_basename}.json")
+        cache_path = os.path.join(cls.get_config().storage_dir, f"{cls.current_pdf_basename}.json")
         if os.path.exists(cache_path):
             try:
                 with open(cache_path, "r", encoding="utf-8") as f:
@@ -145,7 +129,7 @@ class GlobalState():
         """
 
         def _save():
-            cache_path = os.path.join(get_storage_dir(), f"{cls.current_pdf_basename}.json")
+            cache_path = os.path.join(cls.get_config().storage_dir, f"{cls.current_pdf_basename}.json")
             try:
                 with open(cache_path, "w", encoding="utf-8") as f:
                     json.dump(GlobalState.get_pdf_data(), f, ensure_ascii=False, indent=2, cls=NumpyEncoder)
@@ -166,94 +150,3 @@ class GlobalState():
         """
         return cls.config_manager.config
 
-    @classmethod
-    def update_config(cls, new_config):
-        """
-        更新配置。
-        :param new_config: AppConfig实例
-        :return: (bool, str) 是否成功及消息
-        """
-        return cls.config_manager.update_config(new_config)
-
-    @classmethod
-    def get_storage_dir(cls):
-        """
-        获取存储目录。
-        :return: str 路径
-        """
-        return get_storage_dir()
-
-    @classmethod
-    def get_base_url(cls):
-        """
-        获取大模型Base URL。
-        :return: str
-        """
-        return get_base_url()
-
-    @classmethod
-    def get_api_key(cls):
-        """
-        获取API Key。
-        :return: str
-        """
-        return get_api_key()
-
-    @classmethod
-    def get_model_name(cls):
-        """
-        获取主模型名称。
-        :return: str
-        """
-        return get_model_name()
-
-    # 自动标点和分段配置访问方法
-    @classmethod
-    def get_punctuate_model_name(cls):
-        """
-        获取自动标点和分段模型名称。
-        :return: str
-        """
-        return get_punctuate_model_name()
-
-    @classmethod
-    def get_punctuate_system_prompt(cls):
-        """
-        获取自动标点和分段系统提示词。
-        :return: str
-        """
-        return get_punctuate_system_prompt()
-
-    # 白话文转换配置访问方法
-    @classmethod
-    def get_vernacular_model_name(cls):
-        """
-        获取白话文转换模型名称。
-        :return: str
-        """
-        return get_vernacular_model_name()
-
-    @classmethod
-    def get_vernacular_system_prompt(cls):
-        """
-        获取白话文转换系统提示词。
-        :return: str
-        """
-        return get_vernacular_system_prompt()
-
-    # 古文解释配置访问方法
-    @classmethod
-    def get_explain_model_name(cls):
-        """
-        获取古文解释模型名称。
-        :return: str
-        """
-        return get_explain_model_name()
-
-    @classmethod
-    def get_explain_system_prompt(cls):
-        """
-        获取古文解释系统提示词。
-        :return: str
-        """
-        return get_explain_system_prompt()

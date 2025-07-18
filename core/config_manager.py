@@ -1,10 +1,12 @@
 import json
 import os
 import re
-from typing import Dict, Any, Callable
+import shutil
+from typing import Callable
 from dataclasses import dataclass, asdict
-from PySide6.QtCore import QObject, Signal, QTimer
 from core.utils.logger import info, warning, error
+from core.utils.path_util import get_user_store_path
+
 
 @dataclass
 class AppConfig:
@@ -85,15 +87,12 @@ class AppConfig:
         url_pattern = re.compile(r"^https?://[\w\-\.]+(:\d+)?(/.*)?$")
         return bool(url_pattern.match(url))
 
-class ConfigManager(QObject):
+class ConfigManager:
     """
     配置管理器。
-    负责加载、保存、更新应用配置，并支持配置变更信号和监听器。
+    负责加载、保存、更新应用配置。
     单例实现，确保全局唯一。
     """
-    
-    # 配置变更信号
-    config_changed = Signal(AppConfig)
     
     _instance = None
     
@@ -102,18 +101,22 @@ class ConfigManager(QObject):
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def __init__(self, config_path: str = "config.json"):
+    def __init__(self):
         if hasattr(self, '_initialized'):
             return
         super().__init__()
-        self.config_path = config_path
+        self.config_path = os.path.join(get_user_store_path("config.json"))
         self._config = AppConfig()
         self._config_listeners: list[Callable[[AppConfig], None]] = []
         self._initialized = True
-        self._save_timer = QTimer(self)
-        self._save_timer.setSingleShot(True)
-        self._save_timer.timeout.connect(self._do_save_config)
-        self._pending_save = False
+        # 如果用户下有模型文件则默认添加到配置中
+        self.model_config_fields = [
+            ("doc_unwarping_model_dir", "doc_unwarping_model_name"),
+            ("text_detection_model_dir", "text_detection_model_name"),
+            ("text_recognition_model_dir", "text_recognition_model_name"),
+            ("textline_orientation_model_dir", "textline_orientation_model_name")
+        ]
+        self.openai_config_fields = ["base_url", "api_key", "model_name"]
         self._load_config()
     
     @property
@@ -123,33 +126,6 @@ class ConfigManager(QObject):
         :return: AppConfig实例
         """
         return self._config
-
-    def add_config_listener(self, listener: Callable[[AppConfig], None]):
-        """
-        添加配置变更监听器。
-        :param listener: 回调函数，参数为AppConfig
-        """
-        if listener not in self._config_listeners:
-            self._config_listeners.append(listener)
-
-    def remove_config_listener(self, listener: Callable[[AppConfig], None]):
-        """
-        移除配置变更监听器。
-        :param listener: 回调函数
-        """
-        if listener in self._config_listeners:
-            self._config_listeners.remove(listener)
-
-    def _notify_listeners(self, config: AppConfig):
-        """
-        通知所有监听器配置已变更。
-        :param config: 最新AppConfig
-        """
-        for listener in self._config_listeners:
-            try:
-                listener(config)
-            except Exception as e:
-                warning(f"配置监听器执行失败: {e}")
     
     def _load_config(self):
         """
@@ -167,21 +143,13 @@ class ConfigManager(QObject):
                 self._config = AppConfig()
         else:
             # 设置默认存储目录
-            self._config.storage_dir = os.path.join(os.getcwd(), "ocr_results")
-            self._save_config()
+            self._config.storage_dir = get_user_store_path("ocr_results")
+            self.do_save_config()
             info("未找到配置文件，已创建默认配置")
 
-        # 如果用户下有模型文件则默认添加到配置中
-        # 拼接得到 .paddlex/official_models 的绝对路径
+        # paddlex 模型默认下载地址
         paddlex_models_path = os.path.join(os.path.expanduser("~"), ".paddlex", "official_models")
-        model_fields = [
-            ("doc_unwarping_model_dir", "doc_unwarping_model_name"),
-            ("text_detection_model_dir", "text_detection_model_name"),
-            ("text_recognition_model_dir", "text_recognition_model_name"),
-            ("textline_orientation_model_dir", "textline_orientation_model_name"),
-        ]
-
-        for dir_attr, name_attr in model_fields:
+        for dir_attr, name_attr in self.model_config_fields:
             model_dir = getattr(self._config, dir_attr)
             model_name = getattr(self._config, name_attr)
             if not model_dir:
@@ -192,22 +160,10 @@ class ConfigManager(QObject):
                 if not os.path.exists(model_dir):
                     setattr(self._config, dir_attr, '')
 
-
-    def _save_config(self):
-        """
-        优化：延迟写入配置到文件，防止频繁IO。
-        """
-        self._pending_save = True
-        # 3秒后写入，如有新请求会重置
-        self._save_timer.start(3000)
-
-    def _do_save_config(self):
+    def do_save_config(self):
         """
         真正执行写入磁盘操作。
         """
-        if not self._pending_save:
-            return
-        self._pending_save = False
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(asdict(self._config), f, ensure_ascii=False, indent=2)
@@ -236,13 +192,7 @@ class ConfigManager(QObject):
         
         # 更新配置
         self._config = new_config
-        self._save_config()
-        
-        # 发送配置变更信号
-        self.config_changed.emit(self._config)
-        
-        # 通知所有监听器
-        self._notify_listeners(self._config)
+        self.do_save_config()
         
         return True, "配置更新成功"
     
@@ -255,253 +205,16 @@ class ConfigManager(QObject):
         """
         try:
             # 确保新目录存在
-            os.makedirs(new_storage_dir, exist_ok=True)
-            
+            if not os.path.exists(new_storage_dir):
+                return False, "选择目录不存在"
             # 如果旧目录存在且有数据，可以选择迁移
             old_storage_dir = self._config.storage_dir
             if os.path.exists(old_storage_dir) and os.listdir(old_storage_dir):
                 # 这里可以添加数据迁移逻辑
-                pass
-                
+                shutil.move(old_storage_dir, new_storage_dir)
+
             info(f"存储目录变更为: {new_storage_dir}")
             return True, ""
         except Exception as e:
             error(f"创建存储目录失败: {e}")
             return False, f"创建存储目录失败: {e}"
-    
-    def get_config_dict(self) -> Dict[str, Any]:
-        """
-        获取配置字典。
-        :return: dict
-        """
-        return asdict(self._config)
-    
-    def set_config_from_dict(self, config_dict: Dict[str, Any]) -> tuple[bool, str]:
-        """
-        从字典设置配置。
-        :param config_dict: dict
-        :return: (bool, str) 是否成功及消息
-        """
-        try:
-            new_config = AppConfig(**config_dict)
-            return self.update_config(new_config)
-        except Exception as e:
-            error(f"配置格式错误: {e}")
-            return False, f"配置格式错误: {e}"
-
-# 便捷的配置访问函数
-def get_config() -> AppConfig:
-    """
-    获取当前配置。
-    :return: AppConfig实例
-    """
-    return ConfigManager().config
-
-def get_base_url() -> str:
-    """
-    获取Base URL。
-    :return: Base URL字符串
-    """
-    return get_config().base_url
-
-def get_api_key() -> str:
-    """
-    获取API Key。
-    :return: API Key字符串
-    """
-    return get_config().api_key
-
-def get_model_name() -> str:
-    """
-    获取模型名称。
-    :return: 模型名称字符串
-    """
-    return get_config().model_name
-
-def get_storage_dir() -> str:
-    """
-    获取存储目录。
-    :return: 存储目录字符串
-    """
-    return get_config().storage_dir
-
-# 自动标点和分段配置访问函数
-def get_punctuate_model_name() -> str:
-    """
-    获取自动标点和分段模型名称。
-    :return: 模型名称字符串
-    """
-    return get_config().punctuate_model_name
-
-def get_punctuate_system_prompt() -> str:
-    """
-    获取自动标点和分段系统提示词。
-    :return: 系统提示词字符串
-    """
-    return get_config().punctuate_system_prompt
-
-# 白话文转换配置访问函数
-def get_vernacular_model_name() -> str:
-    """
-    获取白话文转换模型名称。
-    :return: 模型名称字符串
-    """
-    return get_config().vernacular_model_name
-
-def get_vernacular_system_prompt() -> str:
-    """
-    获取白话文转换系统提示词。
-    :return: 系统提示词字符串
-    """
-    return get_config().vernacular_system_prompt
-
-# 古文解释配置访问函数
-def get_explain_model_name() -> str:
-    """
-    获取古文解释模型名称。
-    :return: 模型名称字符串
-    """
-    return get_config().explain_model_name
-
-def get_explain_system_prompt() -> str:
-    """
-    获取古文解释系统提示词。
-    :return: 系统提示词字符串
-    """
-    return get_config().explain_system_prompt
-
-# OCR配置访问函数
-
-def get_doc_unwarping_model_dir() -> str:
-    """
-    获取文本图像矫正模块模型路径。
-    :return: 模型路径字符串
-    """
-    return get_config().doc_unwarping_model_dir
-
-def get_doc_unwarping_model_name() -> str:
-    """
-    获取文本图像矫正模块模型名称。
-    :return: 模型名称字符串
-    """
-    return get_config().doc_unwarping_model_name
-
-def get_textline_orientation_model_dir() -> str:
-    """
-    获取文本行方向分类模块模型路径。
-    :return: 模型路径字符串
-    """
-    return get_config().textline_orientation_model_dir
-
-def get_textline_orientation_model_name() -> str:
-    """
-    获取文本行方向分类模块模型名称。
-    :return: 模型名称字符串
-    """
-    return get_config().textline_orientation_model_name
-
-def get_text_detection_model_dir() -> str:
-    """
-    获取文本检测模块模型路径。
-    :return: 模型路径字符串
-    """
-    return get_config().text_detection_model_dir
-
-def get_text_detection_model_name() -> str:
-    """
-    获取文本检测模块模型名称。
-    :return: 模型名称字符串
-    """
-    return get_config().text_detection_model_name
-
-def get_text_recognition_model_dir() -> str:
-    """
-    获取文本识别模块模型路径。
-    :return: 模型路径字符串
-    """
-    return get_config().text_recognition_model_dir
-
-def get_text_recognition_model_name() -> str:
-    """
-    获取文本识别模块模型名称。
-    :return: 模型名称字符串
-    """
-    return get_config().text_recognition_model_name
-
-def get_use_doc_unwarping() -> bool:
-    """
-    获取是否使用文档扭曲矫正模块。
-    :return: bool
-    """
-    return get_config().use_doc_unwarping
-
-def get_use_textline_orientation() -> bool:
-    """
-    获取是否使用文本行方向分类模块。
-    :return: bool
-    """
-    return get_config().use_textline_orientation
-
-def get_text_det_limit_type() -> str:
-    """
-    获取文本检测的图像边长限制类型。
-    :return: 限制类型字符串
-    """
-    return get_config().text_det_limit_type
-
-def get_text_det_limit_side_len() -> int:
-    """
-    获取文本检测的图像边长限制。
-    :return: 限制边长
-    """
-    return get_config().text_det_limit_side_len
-
-def get_text_det_thresh() -> float:
-    """
-    获取文本检测像素阈值。
-    :return: 阈值
-    """
-    return get_config().text_det_thresh
-
-def get_text_det_box_thresh() -> float:
-    """
-    获取测框阈值。
-    :return: 阈值
-    """
-    return get_config().text_det_box_thresh
-
-def get_text_det_unclip_ratio() -> float:
-    """
-    获取文本检测扩张系数。
-    :return: 扩张系数
-    """
-    return get_config().text_det_unclip_ratio
-
-def get_text_rec_score_thresh() -> float:
-    """
-    获取识别阈值。
-    :return: 阈值
-    """
-    return get_config().text_rec_score_thresh
-
-def update_config(new_config: AppConfig) -> tuple[bool, str]:
-    """
-    更新配置。
-    :param new_config: 新AppConfig对象
-    :return: (bool, str) 是否成功及消息
-    """
-    return ConfigManager().update_config(new_config)
-
-def add_config_listener(listener: Callable[[AppConfig], None]):
-    """
-    添加配置变更监听器。
-    :param listener: 回调函数，参数为AppConfig
-    """
-    ConfigManager().add_config_listener(listener)
-
-def remove_config_listener(listener: Callable[[AppConfig], None]):
-    """
-    移除配置变更监听器。
-    :param listener: 回调函数
-    """
-    ConfigManager().remove_config_listener(listener)

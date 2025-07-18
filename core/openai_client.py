@@ -1,12 +1,7 @@
 from openai import OpenAI
 
-from core.global_state import GlobalState
-from core.config_manager import (
-    get_punctuate_model_name, get_punctuate_system_prompt,
-    get_vernacular_model_name, get_vernacular_system_prompt,
-    get_explain_model_name, get_explain_system_prompt
-)
-from core.utils.logger import info, warning, error
+from core.config_manager import ConfigManager
+from core.utils.logger import info
 
 
 class OpenAIClient:
@@ -15,48 +10,35 @@ class OpenAIClient:
     用于与大模型API进行交互，支持自动标点、白话文转换、古文解释等流式输出。
     自动监听配置变更，动态切换API参数。
     """
+    config_manager = ConfigManager()
+
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self):
-        """
-        初始化OpenAI客户端，注册配置变更监听器。
-        """
-        try:
-            self._init_client()
-            info("OpenAIClient初始化成功")
-            # 注册配置变更监听器
-            GlobalState.config_manager.add_config_listener(self._on_config_changed)
-        except Exception as e:
-            error(f"OpenAIClient初始化失败: {e}")
-    
-    def _init_client(self):
+        if hasattr(self, '_initialized'):
+            return
+        super().__init__()
+        self._initialized = True
+        self.init_client()
+
+    def init_client(self):
         """
         初始化OpenAI底层client对象，读取当前配置。
         """
-        self.base_url = GlobalState.get_base_url()
-        self.api_key = GlobalState.get_api_key()
-        self.model_name = GlobalState.get_model_name()
+        self.base_url = self.config_manager.config.base_url
+        self.api_key = self.config_manager.config.api_key
+        self.model_name = self.config_manager.config.model_name
         self.client = OpenAI(
             base_url=self.base_url,
             api_key=self.api_key
         )
-        info(f"OpenAIClient参数: base_url={self.base_url}, model={self.model_name}")
-    
-    def _on_config_changed(self, config):
-        """
-        配置变更时的回调，自动重建client。
-        :param config: 最新AppConfig对象
-        """
-        info("检测到配置变更，重建OpenAIClient")
-        self._init_client()
 
-    def __del__(self):
-        """
-        析构时移除监听器，防止内存泄漏。
-        """
-        try:
-            GlobalState.config_manager.remove_config_listener(self._on_config_changed)
-            info("OpenAIClient析构，移除配置监听器")
-        except Exception as e:
-            warning(f"OpenAIClient析构异常: {e}")
+        info(f"OpenAIClient初始化成功，参数: base_url={self.base_url}, model={self.model_name}")
 
     def stream_punctuate(self, text):
         """
@@ -64,8 +46,8 @@ class OpenAIClient:
         :param text: 需要处理的古文文本
         :return: 生成器，流式返回结果字符串
         """
-        model_name = get_punctuate_model_name()
-        system_prompt = get_punctuate_system_prompt()
+        model_name = self.config_manager.config.punctuate_model_name
+        system_prompt = self.config_manager.config.punctuate_system_prompt
         return self._call_openai(model_name, system_prompt, text)
 
     def stream_vernacular(self, text):
@@ -74,8 +56,8 @@ class OpenAIClient:
         :param text: 需要转换的古文文本
         :return: 生成器，流式返回结果字符串
         """
-        model_name = get_vernacular_model_name()
-        system_prompt = get_vernacular_system_prompt()
+        model_name = self.config_manager.config.vernacular_model_name
+        system_prompt = self.config_manager.config.vernacular_system_prompt
         return self._call_openai(model_name, system_prompt, text)
 
     def stream_explain(self, prompt):
@@ -84,8 +66,8 @@ class OpenAIClient:
         :param prompt: 需要解释的古文内容
         :return: 生成器，流式返回结果字符串
         """
-        model_name = get_explain_model_name()
-        system_prompt = get_explain_system_prompt()
+        model_name = self.config_manager.config.explain_model_name
+        system_prompt = self.config_manager.config.explain_system_prompt
         return self._call_openai(model_name, system_prompt, prompt)
 
     def _call_openai(self, model_name=None, system_prompt=None, prompt=None):

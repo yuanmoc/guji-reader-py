@@ -52,7 +52,25 @@
 ```bash
 pip install -r requirements.txt
 ```
-注意⚠️：还需要安装 [paddlepaddle](https://www.paddlepaddle.org.cn/install/quick)
+
+注意⚠️：还需要安装 [paddlepaddle](https://www.paddlepaddle.org.cn/install/quick) 
+选择一种合适于自己电脑的方式安装
+```bash
+# mac os cpu
+python -m pip install paddlepaddle==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+
+# windows cu129
+python -m pip install paddlepaddle-gpu==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu129/
+
+# windows cu126
+python -m pip install paddlepaddle-gpu==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+
+# windows cu118
+python -m pip install paddlepaddle-gpu==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
+
+# windows cpu
+python -m pip install paddlepaddle==3.1.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+```
 
 ### 2. 启动应用
 
@@ -60,12 +78,14 @@ pip install -r requirements.txt
 python main.py
 ```
 
+打包成桌面应用请查看 [打包应用](PACK_README.md)
+
 ### 3. 依赖说明
 
 - PySide6
 - paddleocr
 - PyMuPDF
-- openai
+- openai （直接使用 paddleocr 中的）
 - requests
 - markdown
 
