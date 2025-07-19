@@ -53,6 +53,8 @@ rm -rf build
 
 使用 pack.spec 来打包
 ```bash
+rm -rf dist 
+rm -rf build
 pyinstaller pack.spec
 ```
 

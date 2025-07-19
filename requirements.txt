@@ -1,6 +1,10 @@
 PySide6
 paddleocr
-PyMuPDF
+pypdfium2
 openai
 requests
 markdown
+pillow
+json5
+paddlepaddle --index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
+

@@ -1,15 +1,17 @@
+from PIL import ImageQt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QDialog, QScrollArea, \
-    QFrame, QBoxLayout, QTableWidget, QTableWidgetItem, QSizePolicy
+    QFrame, QBoxLayout, QTableWidget, QTableWidgetItem, QSizePolicy, QHeaderView
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap, QImage, QFont, QFontMetrics, QGuiApplication
+from PySide6.QtGui import QPixmap, QFont, QFontMetrics, QGuiApplication, QImage, QIcon, QTransform
 from core.global_state import GlobalState
 from ui.pdf_viewer import PDFViewerWidget
 from core.utils.logger import info
 
 
-def crop_poly_image(qimage, poly):
+def crop_poly_image(qimage, poly, orientation):
     """
     裁剪多边形区域的图片。
+    :param orientation: 'horizontal' 水平  或 'vertical' 垂直
     :param qimage: QImage原图
     :param poly: 多边形坐标列表[[x1, y1], ...]
     :return: QPixmap裁剪结果
@@ -25,6 +27,15 @@ def crop_poly_image(qimage, poly):
 
     # 裁剪矩形区域
     rect = qimage.copy(x_min, y_min, width, height)
+
+    # 判断是否需要旋转
+    if orientation == "horizontal" and height > width * 2:
+        # 水平排版但区域为竖版，逆时针旋转270度
+        rect = rect.transformed(QTransform().rotate(270))
+    elif orientation == "vertical" and width > height * 2:
+        # 竖直排版但区域为横版，顺时针旋转90度
+        rect = rect.transformed(QTransform().rotate(90))
+
     return QPixmap.fromImage(rect)
 
 class ProofreadDialog(QDialog):
@@ -60,7 +71,7 @@ class ProofreadDialog(QDialog):
             hbox = QVBoxLayout()
 
         for idx, (text, poly) in enumerate(zip(rec_texts, rec_polys)):
-            pix = crop_poly_image(page_image, poly)
+            pix = crop_poly_image(page_image, poly, orientation)
             # 按固定宽度等比例缩放图片
             if orientation == "vertical":
                 scaled_pixmap = pix.scaledToWidth(50, Qt.TransformationMode.SmoothTransformation)
@@ -100,6 +111,8 @@ class ProofreadDialog(QDialog):
         vbox.addLayout(hbox)
         content.setLayout(vbox)
         scroll.setWidget(content)
+        # 滑动到最右边
+        scroll.horizontalScrollBar().setValue(scroll.horizontalScrollBar().maximum())
         layout.addWidget(scroll, 1)
 
     def make_text_changed_handler(self, text_edit, idx):
@@ -156,16 +169,19 @@ class ProofreadTabWidget(QWidget):
         font = QFont()
         font.setPointSize(16)
         self.result_table = QTableWidget(self)
-        self.result_table.setColumnCount(3)
-        self.result_table.horizontalHeader().setStretchLastSection(True)
+        self.result_table.setColumnCount(4)
+        self.result_table.horizontalHeader().setStretchLastSection(False)  # 禁用末列拉伸
+        # 第二列拉伸
+        self.result_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.result_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.result_table.setFont(font)
-        self.result_table.setHorizontalHeaderLabels(["↑", "↓", "校对文本内容"])
+        self.result_table.setHorizontalHeaderLabels(["↑", "↓", "校对文本内容", "删除"])
         self.result_table.currentCellChanged.connect(self.on_text_line_selected)
         self.result_table.cellChanged.connect(self.on_text_line_edited)
         # 设置按钮列宽为最小，第一列自适应剩余空间
         self.result_table.setColumnWidth(0, 20)
         self.result_table.setColumnWidth(1, 20)
+        self.result_table.setColumnWidth(3, 20)
         layout.addWidget(self.result_table, 1)
 
     def open_proofread(self):
@@ -176,10 +192,9 @@ class ProofreadTabWidget(QWidget):
             self.status_label.setText("状态: 缺少PDF或OCR信息")
             return
         # 获取当前页图片
-        page = self.pdf_viewer.pdf_doc.load_page(GlobalState.current_page)
-        pix = page.get_pixmap(matrix=None)
-        img = QImage(pix.samples, pix.width, pix.height, pix.stride,
-                     QImage.Format.Format_RGBA8888 if pix.alpha else QImage.Format.Format_RGB888)
+        page = self.pdf_viewer.pdf_doc.get_page(GlobalState.get_config().last_open_page)
+        pil_image = page.render(scale=1).to_pil()
+        img = QImage(ImageQt.ImageQt(pil_image))
         # 获取OCR结果
         ocr_data = GlobalState.get_pdf_page_data().get("ocr", {})
         if not ocr_data or not ocr_data.get("rec_texts"):
@@ -232,6 +247,10 @@ class ProofreadTabWidget(QWidget):
             item = QTableWidgetItem(text)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
             self.result_table.setItem(i, 2, item)
+
+            del_btn = QPushButton("X")
+            del_btn.clicked.connect(lambda _, row=i: self.delete_row_data(row))
+            self.result_table.setCellWidget(i, 3, del_btn)
 
         self.result_table.blockSignals(False)
         self.selected_text_index = -1
@@ -293,7 +312,7 @@ class ProofreadTabWidget(QWidget):
         # 复制全部文本到剪贴板
         texts = []
         for row in range(self.result_table.rowCount()):
-            item = self.result_table.item(row, 0)
+            item = self.result_table.item(row, 2)
             if item:
                 texts.append(item.text())
         all_text = "\n".join(texts)
@@ -336,3 +355,14 @@ class ProofreadTabWidget(QWidget):
         self.result_table.selectRow(row+1)
         GlobalState.save_cache()
         info(f"下移第{row+1}行")
+
+    def delete_row_data(self, row):
+        # 删除原数据
+        page_data = GlobalState.get_pdf_page_data()
+        del page_data.get("ocr", {}).get("rec_texts", [])[row]
+        del page_data.get("ocr", {}).get("rec_scores", [])[row]
+        del page_data.get("ocr", {}).get("rec_polys", [])[row]
+        self.show_ocr_text()
+        self.result_table.selectRow(row)
+        GlobalState.save_cache()
+        info(f"删除第{row+1}行")

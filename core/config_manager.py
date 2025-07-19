@@ -1,4 +1,4 @@
-import json
+import json5
 import os
 import re
 import shutil
@@ -135,7 +135,7 @@ class ConfigManager:
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
-                    config_data = json.load(f)
+                    config_data = json5.load(f)
                     self._config = AppConfig(**config_data)
                 info(f"加载配置文件成功: {self.config_path}")
             except Exception as e:
@@ -166,7 +166,7 @@ class ConfigManager:
         """
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(asdict(self._config), f, ensure_ascii=False, indent=2)
+                json5.dump(asdict(self._config), f, ensure_ascii=False, indent=2)
             info(f"保存配置文件成功: {self.config_path}")
         except Exception as e:
             error(f"保存配置文件失败: {e}")

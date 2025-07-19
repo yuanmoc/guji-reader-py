@@ -2,7 +2,6 @@
 import site, os, shutil
 from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 from pathlib import Path
-
 def get_core_file_path():
     """
     获取修复文件路径
@@ -79,6 +78,7 @@ def restore_original_file():
 backup_original_file()
 fix_paddle_core()
 
+
 # 收集数据文件和元数据
 paddlex_data = collect_data_files('paddlex')
 metadata_files = [
@@ -106,17 +106,17 @@ for metadata in metadata_files:
 
 # 二进制文件（请替换为实际路径）
 # 获取第三方库安装路径
-# site_packages = site.getsitepackages()[0]
-# binary_path = os.path.join(site_packages, 'paddle', 'libs')
-# binaries = [(binary_path, ".")] if os.path.exists(binary_path) else []
+site_packages = site.getsitepackages()
+binary_path = os.path.join(*site_packages, 'paddle', 'libs')
+binaries = [(binary_path, ".")] if os.path.exists(binary_path) else []
 
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=all_datas + [('ui/assets', 'ui/assets')],
-    hiddenimports=['scipy._cyutility', 'sklearn._cyutility'],
+    hiddenimports=['sklearn._cyutility'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -160,6 +160,7 @@ app = BUNDLE(
     icon='./ui/assets/logo.png',
     bundle_identifier='com.github.yuanmoc',
 )
+
 
 # 还原本地文件
 restore_original_file()

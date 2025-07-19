@@ -1,6 +1,6 @@
 from openai import OpenAI
 
-from core.config_manager import ConfigManager
+from core.global_state import GlobalState
 from core.utils.logger import info
 
 
@@ -10,7 +10,7 @@ class OpenAIClient:
     用于与大模型API进行交互，支持自动标点、白话文转换、古文解释等流式输出。
     自动监听配置变更，动态切换API参数。
     """
-    config_manager = ConfigManager()
+    config = GlobalState.get_config()
 
     _instance = None
 
@@ -30,9 +30,9 @@ class OpenAIClient:
         """
         初始化OpenAI底层client对象，读取当前配置。
         """
-        self.base_url = self.config_manager.config.base_url
-        self.api_key = self.config_manager.config.api_key
-        self.model_name = self.config_manager.config.model_name
+        self.base_url = self.config.base_url
+        self.api_key = self.config.api_key
+        self.model_name = self.config.model_name
         self.client = OpenAI(
             base_url=self.base_url,
             api_key=self.api_key
@@ -46,8 +46,8 @@ class OpenAIClient:
         :param text: 需要处理的古文文本
         :return: 生成器，流式返回结果字符串
         """
-        model_name = self.config_manager.config.punctuate_model_name
-        system_prompt = self.config_manager.config.punctuate_system_prompt
+        model_name = self.config.punctuate_model_name
+        system_prompt = self.config.punctuate_system_prompt
         return self._call_openai(model_name, system_prompt, text)
 
     def stream_vernacular(self, text):
@@ -56,8 +56,8 @@ class OpenAIClient:
         :param text: 需要转换的古文文本
         :return: 生成器，流式返回结果字符串
         """
-        model_name = self.config_manager.config.vernacular_model_name
-        system_prompt = self.config_manager.config.vernacular_system_prompt
+        model_name = self.config.vernacular_model_name
+        system_prompt = self.config.vernacular_system_prompt
         return self._call_openai(model_name, system_prompt, text)
 
     def stream_explain(self, prompt):
@@ -66,8 +66,8 @@ class OpenAIClient:
         :param prompt: 需要解释的古文内容
         :return: 生成器，流式返回结果字符串
         """
-        model_name = self.config_manager.config.explain_model_name
-        system_prompt = self.config_manager.config.explain_system_prompt
+        model_name = self.config.explain_model_name
+        system_prompt = self.config.explain_system_prompt
         return self._call_openai(model_name, system_prompt, prompt)
 
     def _call_openai(self, model_name=None, system_prompt=None, prompt=None):

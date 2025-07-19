@@ -8,7 +8,6 @@ from core.global_state import GlobalState
 from PySide6.QtWidgets import QCheckBox, QComboBox
 from PySide6.QtGui import QFont
 
-from core.ocr_client import OcrClient
 from core.openai_client import OpenAIClient
 from core.utils.logger import info, warning
 

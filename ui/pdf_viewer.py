@@ -1,12 +1,11 @@
 import math
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QFileDialog, \
-    QSizePolicy
+    QSizePolicy, QScrollArea, QFrame
 from PySide6.QtCore import Qt, Signal, QPoint, QRect, QPointF, QRectF
-from PySide6.QtGui import QPainter, QColor, QPen, QPolygon, QBrush
-import fitz  # PyMuPDF
-from PySide6.QtGui import QPixmap, QImage
-from pymupdf import Document
+from PySide6.QtGui import QPainter, QColor, QPen, QPolygon, QBrush, QPixmap, QIntValidator
+import pypdfium2
+from PIL import ImageQt
 import os
 
 from core.global_state import GlobalState
@@ -59,7 +58,7 @@ class OverlayWidget(QWidget):
         """
         index = index if index is not None else -1
         if self.selected_index != index:
-            info(f"PDF页面上高亮第{index+1}个识别框，并准备通知右侧文本区联动选中")
+            info(f"PDF页面上高亮第{index + 1}个识别框，并准备通知右侧文本区联动选中")
             self.selected_index = index
         if index < 0:
             self.resize_edge = None
@@ -69,6 +68,7 @@ class OverlayWidget(QWidget):
         # 发送选择变化信号，接收值时None会变成0
         if send_selection_changed_signal:
             self.selection_changed.emit(index)
+
     def paintEvent(self, event):
         if not self.ocr_boxes:
             return
@@ -89,7 +89,6 @@ class OverlayWidget(QWidget):
             if is_selected:
                 self._draw_handles(painter, poly)
                 self._draw_delete_button(painter, poly[1])  # 右上角绘制删除按钮
-
 
     def _draw_handles(self, painter, points):
         """绘制调整控制点"""
@@ -291,19 +290,18 @@ class OverlayWidget(QWidget):
         page_data = GlobalState.get_pdf_page_data()
         # 更新原数据
         page_data.get("ocr", {}).get("rec_polys", [])[self.selected_index] = [
-                                                   [rect.left(), rect.top()],
-                                                   [rect.right(), rect.top()],
-                                                   [rect.right(), rect.bottom()],
-                                                   [rect.left(), rect.bottom()]
-                                               ]
+            [rect.left(), rect.top()],
+            [rect.right(), rect.top()],
+            [rect.right(), rect.bottom()],
+            [rect.left(), rect.bottom()]
+        ]
         # 更新当前使用数据
         self.ocr_boxes[self.selected_index] = ([[rect.left(), rect.top()],
-                                                   [rect.right(), rect.top()],
-                                                   [rect.right(), rect.bottom()],
-                                                   [rect.left(), rect.bottom()]
-                                               ], text)
+                                                [rect.right(), rect.top()],
+                                                [rect.right(), rect.bottom()],
+                                                [rect.left(), rect.bottom()]
+                                                ], text)
         self.update()
-
 
     def delete_box(self, idx):
         if 0 <= idx < len(self.ocr_boxes):
@@ -315,6 +313,7 @@ class OverlayWidget(QWidget):
             del page_data.get("ocr", {}).get("rec_scores", [])[idx]
             del page_data.get("ocr", {}).get("rec_polys", [])[idx]
             self.set_selected_index(None)
+
 
 class PDFViewerWidget(QWidget):
     """
@@ -328,14 +327,18 @@ class PDFViewerWidget(QWidget):
         """
         构造函数。
         :param parent: 父控件
-        :param auto_load_last: 是否自动加载上次文件
         """
         super().__init__(parent)
         self.pdf_doc = None
-        self.current_page = 0
-        self.file_path = None
+        self.config = GlobalState.get_config()
         self.ocr_tab = None  # 保存OCR标签页的引用
-        self.proofread_tab = None # 保存校对标签页的引用
+        self.proofread_tab = None  # 保存校对标签页的引用
+
+        # 新增：缩放相关属性
+        self.scale_factor = 1.0  # 缩放因子
+        self.original_size = (0, 0)  # 原始PDF页面大小
+        self.fit_mode = "fit_window"  # 自适应模式: fit_width, fit_window, actual_size
+
         self.init_ui()
 
     def init_ui(self):
@@ -343,72 +346,202 @@ class PDFViewerWidget(QWidget):
         初始化界面布局，创建工具栏、图片显示区、覆盖层等。
         """
         layout = QVBoxLayout(self)
-        # 工具栏
+
+        # 工具栏 - 优化布局结构
         toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(5, 5, 5, 5)  # 整体边距
+        toolbar.setSpacing(6)  # 控件间距
+
+        # 第一部分：文件操作
+        file_group = QWidget()
+        file_layout = QHBoxLayout(file_group)
+        file_layout.setContentsMargins(0, 0, 0, 0)
+        file_layout.setSpacing(6)
+
         self.open_action = QPushButton("打开PDF")
+        self.open_action.setStyleSheet("""
+                    QPushButton {
+                        background-color: #2196F3;
+                        color: white;
+                        border: none;
+                        padding: 4px 12px;
+                        border-radius: 4px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #50a7ec;
+                    }
+                """)
+        file_layout.addWidget(self.open_action)
+
+        # 添加文件操作区到主工具栏
+        toolbar.addWidget(file_group)
+
+        # 分隔线
+        line1 = QFrame()
+        line1.setFrameShape(QFrame.Shape.VLine)
+        line1.setFrameShadow(QFrame.Shadow.Sunken)
+        toolbar.addWidget(line1)
+
+        # 第二部分：页面导航
+        nav_group = QWidget()
+        nav_layout = QHBoxLayout(nav_group)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(6)
+
         self.prev_btn = QPushButton("上一页")
         self.next_btn = QPushButton("下一页")
+
+        # 页码控制
+        page_widget = QWidget()
+        page_layout = QHBoxLayout(page_widget)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(3)  # 缩小页码控件间距
         self.page_edit = QLineEdit("1")
-        self.page_edit.setFixedWidth(40)
+        self.page_edit.setFixedWidth(36)
         self.page_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.page_edit.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.page_edit.setValidator(QIntValidator(1, 9999, self))  # 限制为1-9999的整数
         self.page_edit.returnPressed.connect(self.goto_page)
         self.page_label = QLabel("/ 0")
+
+        page_layout.addWidget(self.page_edit)
+        page_layout.addWidget(self.page_label)
+        nav_layout.addWidget(self.prev_btn)
+        nav_layout.addWidget(page_widget)
+        nav_layout.addWidget(self.next_btn)
+
+        toolbar.addWidget(nav_group)
+
+        # 分隔线
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.Shape.VLine)
+        line2.setFrameShadow(QFrame.Shadow.Sunken)
+        toolbar.addWidget(line2)
+
+        # 第三部分：缩放控制
+        zoom_group = QWidget()
+        zoom_layout = QHBoxLayout(zoom_group)
+        zoom_layout.setContentsMargins(0, 0, 0, 0)
+        zoom_layout.setSpacing(4)  # 缩放按钮间距稍小
+
+        self.zoom_in_btn = QPushButton("+")
+        self.zoom_out_btn = QPushButton("-")
+        self.fit_width_btn = QPushButton("等宽")
+        self.fit_window_btn = QPushButton("自适应")
+        self.actual_size_btn = QPushButton("1:1")  # 用图标式文本更简洁
+
+        # 调整按钮大小使其更紧凑
+        self.zoom_in_btn.setFixedWidth(30)
+        self.zoom_out_btn.setFixedWidth(30)
+
+        zoom_layout.addWidget(self.zoom_in_btn)
+        zoom_layout.addWidget(self.zoom_out_btn)
+        zoom_layout.addWidget(self.fit_width_btn)
+        zoom_layout.addWidget(self.fit_window_btn)
+        zoom_layout.addWidget(self.actual_size_btn)
+
+        toolbar.addWidget(zoom_group)
+
+        # 伸缩项 - 推到右侧
+        toolbar.addStretch()
+
+        # 第四部分：设置按钮
         self.settings_action = QPushButton("更多设置")
+        toolbar.addWidget(self.settings_action)
 
-        # 优化按钮样式
-        self.open_action.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                padding: 4px 12px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #50a7ec;
-            }
-        """)
-
+        # 连接信号槽
         self.prev_btn.clicked.connect(self.prev_page)
         self.next_btn.clicked.connect(self.next_page)
         self.open_action.clicked.connect(self.open_pdf)
         self.settings_action.clicked.connect(self.open_settings)
-
-        toolbar.addWidget(self.open_action)
-        toolbar.addWidget(self.prev_btn)
-        toolbar.addWidget(self.next_btn)
-
-        # 将页码相关控件组合在一起
-        page_widget = QWidget()
-        page_layout = QHBoxLayout(page_widget)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(0)
-        label = QLabel("跳转:")
-        label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        page_layout.addWidget(label)
-        page_layout.addWidget(self.page_edit)
-        page_layout.addWidget(self.page_label)
-
-        toolbar.addWidget(page_widget)
-        toolbar.addWidget(self.settings_action)
+        self.zoom_in_btn.clicked.connect(self.zoom_in)
+        self.zoom_out_btn.clicked.connect(self.zoom_out)
+        self.fit_width_btn.clicked.connect(lambda: self.set_fit_mode("fit_width"))
+        self.fit_window_btn.clicked.connect(lambda: self.set_fit_mode("fit_window"))
+        self.actual_size_btn.clicked.connect(lambda: self.set_fit_mode("actual_size"))
 
         layout.addLayout(toolbar)
 
+        # 新增：添加滚动区域，用于大图片滚动查看
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         # PDF显示区
+        self.image_container = QWidget()
+        self.image_layout = QVBoxLayout(self.image_container)
+        self.image_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         self.image_label = QLabel("请打开PDF文件")
+        self.image_label.setStyleSheet("border: 2px solid #f9d7d7;padding:0;margin:0;")
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # 创建一个居中容器来显示PDF
-        center_widget = QWidget()
-        center_layout = QHBoxLayout(center_widget)
-        center_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        center_layout.addWidget(self.image_label)
-        layout.addWidget(center_widget, 1)
+        self.image_layout.addWidget(self.image_label)
+
+        self.scroll_area.setWidget(self.image_container)
+        layout.addWidget(self.scroll_area, 1)
 
         # 添加OverlayWidget
         self.overlay = OverlayWidget(self.image_label)
-        self.overlay.setGeometry(0, 0, self.image_label.width(), self.image_label.height())
         self.image_label.installEventFilter(self)
+
+    # 新增：自适应模式相关方法
+    def set_fit_mode(self, mode):
+        """设置自适应模式并重新显示页面"""
+        self.fit_mode = mode
+        self.show_page()  # 重新显示页面应用新模式
+
+    def zoom_in(self):
+        """放大PDF页面"""
+        self.fit_mode = "manual"  # 切换到手动缩放模式
+        self.scale_factor *= 1.2
+        self.show_page()
+
+    def zoom_out(self):
+        """缩小PDF页面"""
+        self.fit_mode = "manual"  # 切换到手动缩放模式
+        self.scale_factor /= 1.2
+        if self.scale_factor < 0.1:  # 限制最小缩放
+            self.scale_factor = 0.1
+        self.show_page()
+
+    def calculate_scale_factor(self):
+        """根据当前模式计算缩放因子"""
+        if not self.original_size[0] or not self.original_size[1]:
+            return 1.0
+
+        if self.fit_mode == "fit_width":
+            # 适应宽度
+            viewport_width = self.scroll_area.viewport().width()
+            return viewport_width / self.original_size[0] if self.original_size[0] > 0 else 1.0
+
+        elif self.fit_mode == "fit_window":
+            # 适应窗口（保持比例）
+            viewport_width = self.scroll_area.viewport().width()
+            viewport_height = self.scroll_area.viewport().height()
+
+            width_ratio = viewport_width / self.original_size[0]
+            height_ratio = viewport_height / self.original_size[1]
+
+            return min(width_ratio, height_ratio)
+
+        elif self.fit_mode == "actual_size":
+            # 实际大小
+            return 1.0
+
+        else:  # manual
+            # 手动缩放，保持当前缩放因子
+            return self.scale_factor
+
+    # 修改：重写resizeEvent方法
+    def resizeEvent(self, event):
+        """窗口大小变化时重新计算缩放"""
+        super().resizeEvent(event)
+        if hasattr(self, 'overlay'):
+            self.overlay.setGeometry(0, 0, self.image_label.width(), self.image_label.height())
+
+        # 当窗口大小改变且不是手动缩放模式时，重新计算缩放
+        self.show_page()
 
     def set_ocr_tab(self, ocr_tab):
         """
@@ -434,22 +567,13 @@ class PDFViewerWidget(QWidget):
         OverlayWidget选择变化时的回调
         :param index: 选中的索引
         """
-        info(f"PDF页面上的识别框被点击，正在联动右侧文本区选中第{index+1}行")
+        info(f"PDF页面上的识别框被点击，正在联动右侧文本区选中第{index + 1}行")
         # OCR联动
         if hasattr(self, 'ocr_tab') and self.ocr_tab and hasattr(self.ocr_tab, 'set_selection_from_pdf'):
             self.ocr_tab.set_selection_from_pdf(index)
         # 校对联动
         if hasattr(self, 'proofread_tab') and self.proofread_tab and hasattr(self.proofread_tab, 'set_selection_from_pdf'):
             self.proofread_tab.set_selection_from_pdf(index)
-
-    def resizeEvent(self, event):
-        """
-        窗口大小变化时，调整覆盖层大小。
-        :param event: QResizeEvent
-        """
-        super().resizeEvent(event)
-        if hasattr(self, 'overlay'):
-            self.overlay.setGeometry(0, 0, self.image_label.width(), self.image_label.height())
 
     def open_settings(self):
         """
@@ -460,13 +584,12 @@ class PDFViewerWidget(QWidget):
 
     def auto_load_default_pdf(self):
         """
-        新增：自动加载上次文件
+        自动加载上次文件
         :return:
         """
-        config = GlobalState.get_config()
-        if config.last_open_file and os.path.exists(config.last_open_file):
-            info(f"自动加载上次文件: {config.last_open_file}, 页码: {config.last_open_page}")
-            self.load_pdf(config.last_open_file, config.last_open_page)
+        if self.config.last_open_file and os.path.exists(self.config.last_open_file):
+            info(f"自动加载上次文件: {self.config.last_open_file}, 页码: {self.config.last_open_page}")
+            self.load_pdf(self.config.last_open_file, self.config.last_open_page)
         else:
             info("未检测到上次打开的PDF文件")
 
@@ -486,24 +609,24 @@ class PDFViewerWidget(QWidget):
         :param page_num: 指定页码（可选）
         """
         try:
-            self.pdf_doc = fitz.open(file_path)
-            self.file_path = file_path
-            if page_num is not None and 0 <= page_num < self.pdf_doc.page_count:
-                self.current_page = page_num
+            self.pdf_doc = pypdfium2.PdfDocument(file_path)
+            self.config.last_open_file = file_path
+            if page_num is not None and 0 <= page_num < len(self.pdf_doc):
+                self.config.last_open_page = page_num
             else:
-                self.current_page = 0
-            self.page_edit.setText(str(self.current_page + 1))
-            self.page_label.setText(f"/ {self.pdf_doc.page_count}")
+                self.config.last_open_page = 0
+            self.page_edit.setText(str(self.config.last_open_page + 1))
+            self.page_label.setText(f"/ {len(self.pdf_doc)}")
             self.file_changed.emit(file_path)
             self.show_page()
-            info(f"PDF加载成功: {file_path}, 当前页: {self.current_page}")
+            info(f"PDF加载成功: {file_path}, 当前页: {self.config.last_open_page}")
         except Exception as e:
             error(f"PDF加载失败: {file_path}, 错误: {e}")
 
-    def get_pdf_doc(self) -> Document:
+    def get_pdf_doc(self):
         """
         获取当前PDF文档对象。
-        :return: pymupdf.Document
+        :return: pypdfium2.PdfDocument
         """
         return self.pdf_doc
 
@@ -525,16 +648,21 @@ class PDFViewerWidget(QWidget):
 
     def get_scaled_boxes_data(self, ocr_data):
         """
-        获取OCR框坐标信息
-        :param ocr_data:
-        :return:
+        获取缩放后的OCR框坐标信息
+        关键改进：将原始OCR坐标按当前缩放因子进行转换
         """
         boxes = list(zip(ocr_data['rec_polys'], ocr_data['rec_texts']))
         # 需要根据当前缩放调整坐标（如果有缩放功能，则需要调整）
         scaled_boxes = []
+
+        # 根据当前缩放因子调整OCR框坐标
         for poly, text in boxes:
-            scaled_poly = [[x, y] for x, y in poly]
+            scaled_poly = [
+                [x * self.scale_factor, y * self.scale_factor]
+                for x, y in poly
+            ]
             scaled_boxes.append((scaled_poly, text))
+
         return scaled_boxes
 
     def hide_ocr_boxes(self):
@@ -545,38 +673,66 @@ class PDFViewerWidget(QWidget):
 
     def show_page(self):
         """
-        显示当前页PDF图片。
+        显示当前页PDF图片，支持自适应缩放。
         """
         if not self.pdf_doc:
             return
-        page = self.pdf_doc.load_page(self.current_page)
-        pix = page.get_pixmap(matrix=None)
-        img = QImage(pix.samples, pix.width, pix.height, pix.stride,
-                     QImage.Format.Format_RGBA8888 if pix.alpha else QImage.Format.Format_RGB888)
-        self.image_label.setPixmap(QPixmap.fromImage(img))
-        # 关键：让label适应图片大小
-        self.image_label.setFixedSize(pix.width, pix.height)
-        self.page_edit.setText(str(self.current_page + 1))
-        self.page_label.setText(f"/ {self.pdf_doc.page_count}")
-        # 切换页时隐藏OCR框
-        self.hide_ocr_boxes()
-        self.page_changed.emit(self.current_page)
-        info(f"PDF容器像素大小 ==> width: {img.width()}, height: {img.height()}")
+
+        page = self.pdf_doc.get_page(self.config.last_open_page)
+        pil_image = page.render(scale=1).to_pil()
+
+        # 保存原始尺寸
+        self.original_size = (pil_image.width, pil_image.height)
+
+        # 计算缩放因子
+        self.scale_factor = self.calculate_scale_factor()
+
+        # 应用缩放
+        scaled_width = int(pil_image.width * self.scale_factor)
+        scaled_height = int(pil_image.height * self.scale_factor)
+
+        # 转换为Qt图像并缩放
+        img = ImageQt.ImageQt(pil_image)
+        pixmap = QPixmap.fromImage(img)
+        scaled_pixmap = pixmap.scaled(
+            scaled_width, scaled_height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+
+        # 更新显示
+        self.image_label.setPixmap(scaled_pixmap)
+        self.image_label.setFixedSize(scaled_width, scaled_height)
+        self.page_edit.setText(str(self.config.last_open_page + 1))
+        self.page_label.setText(f"/ {len(self.pdf_doc)}")
+
+        # 更新覆盖层大小
+        self.overlay.setGeometry(0, 0, scaled_width, scaled_height)
+
+        # 重新显示OCR框（如果有）
+        page_data = GlobalState.get_pdf_page_data()
+        if page_data and "ocr" in page_data:
+            self.show_ocr_boxes(page_data["ocr"])
+        else:
+            self.hide_ocr_boxes()
+
+        self.page_changed.emit(self.config.last_open_page)
+        info(f"PDF显示大小: {scaled_width}x{scaled_height}, 缩放因子: {self.scale_factor:.2f}")
 
     def prev_page(self):
         """
         跳转到上一页。
         """
-        if self.pdf_doc and self.current_page > 0:
-            self.current_page -= 1
+        if self.pdf_doc and self.config.last_open_page > 0:
+            self.config.last_open_page -= 1
             self.show_page()
 
     def next_page(self):
         """
         跳转到下一页。
         """
-        if self.pdf_doc and self.current_page < self.pdf_doc.page_count - 1:
-            self.current_page += 1
+        if self.pdf_doc and self.config.last_open_page < len(self.pdf_doc) - 1:
+            self.config.last_open_page += 1
             self.show_page()
 
     def goto_page(self):
@@ -587,8 +743,8 @@ class PDFViewerWidget(QWidget):
             return
         try:
             page = int(self.page_edit.text()) - 1
-            if 0 <= page < self.pdf_doc.page_count:
-                self.current_page = page
+            if 0 <= page < len(self.pdf_doc):
+                self.config.last_open_page = page
                 self.show_page()
         except ValueError:
             pass

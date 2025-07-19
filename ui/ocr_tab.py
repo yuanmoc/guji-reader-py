@@ -130,12 +130,13 @@ class OCRTabWidget(QWidget):
         self.ocr_btn.setEnabled(False)
         self.retry_btn.setEnabled(False)
         # 导出当前页为图片
-        page = self.pdf_viewer.pdf_doc.load_page(GlobalState.current_page)
-        info(f"开始OCR，当前页码: {GlobalState.current_page}")
-        pix = page.get_pixmap(matrix=None)
+        last_open_page = GlobalState.get_config().last_open_page
+        page = self.pdf_viewer.pdf_doc.get_page(last_open_page)
+        info(f"开始OCR，当前页码: {last_open_page}")
+        pil_image = page.render(scale=1).to_pil()
         img_path = get_user_store_path("tmp", f"{str(uuid.uuid4())}.png")
-        pix.save(img_path)
-        self.worker = OCRWorker(img_path, pix.width, pix.height)
+        pil_image.save(img_path)
+        self.worker = OCRWorker(img_path, pil_image.width, pil_image.height)
         self.worker.result_signal.connect(self.ocr_success)
         self.worker.error_signal.connect(self.ocr_fail)
         self.worker.start()
@@ -153,6 +154,8 @@ class OCRTabWidget(QWidget):
         self.ocr_btn.setEnabled(True)
         self.retry_btn.setEnabled(True)
         # 缓存与存储
+        texts = ocr_result["rec_texts"]
+        print(texts)
         GlobalState.save_pdf_page_data({"ocr": OcrDataUtil().sort_by_orientation(ocr_result)})
         self.show_ocr_text()
         info("OCR结果已保存并显示")
@@ -247,11 +250,3 @@ class OCRTabWidget(QWidget):
         """
         super().showEvent(event)
         self.show_ocr_text()
-
-    def closeEvent(self, event):
-        try:
-            GlobalState.config_manager.remove_config_listener(_on_config_changed)
-            info("OCRTabWidget析构，移除配置监听器")
-        except Exception as e:
-            error(f"OCRTabWidget析构移除监听器异常: {e}")
-        super().closeEvent(event)

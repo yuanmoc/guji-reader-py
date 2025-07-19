@@ -1,0 +1,45 @@
+/*
+打包报错没有解决
+FATAL: Error, call to 'otool' gave warnings:
+['/usr/bin/otool', '-arch', 'arm64', '-L', './venv/lib/python3.10/site-packages/paddle/libs']
+ -> b"error: /Library/Developer/CommandLineTools/usr/bin/otool-classic:
+ can't map file: ./venv/lib/python3.10/site-packages/paddle/libs (Invalid argument)".
+*/
+{
+  "app_info": {
+    "name": "古籍阅读器",
+    "version": "1.0.0",
+    "description": "基于 PySide6 + PaddleOCR 的古籍阅读器",
+    "main_file": "main.py",
+    "icon_path": "ui/assets/logo.png"
+  },
+  "build_settings": {
+    "packages": [],
+    "data_dirs": ["ui/assets=ui/assets"],
+    "build_dependencies": [
+      "nuitka",
+      "imageio"
+    ],
+    "common_args": [
+      "--standalone", // 启用独立模式输出。
+      "--assume-yes-for-downloads",
+      "--show-progress",
+      "--show-memory",
+      "--enable-plugin=pyside6",
+      "--enable-plugin=numpy",
+      "--enable-plugin=multiprocessing",
+      "--nofollow-import-to=scipy",
+      "--onefile"
+    ],
+    "platforms_args":{
+      "windows": [
+        "--windows-disable-console"
+      ],
+      "macos": [
+        "--macos-create-app-bundle",
+        "--macos-disable-console"
+      ],
+      "linux": ["--linux-disable-console"]
+    }
+  }
+} 

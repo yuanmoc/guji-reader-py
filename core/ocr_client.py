@@ -1,11 +1,11 @@
 from paddleocr import PaddleOCR
-from core.config_manager import ConfigManager
+from core.global_state import GlobalState
 from core.utils.logger import info
 import os
 
 
 class OcrClient:
-    config_manager = ConfigManager()
+    config = GlobalState.get_config()
 
     _instance = None
 
@@ -28,30 +28,28 @@ class OcrClient:
         return v
 
     def init_client(self):
-        config = self.config_manager.config
         try:
             self._ocr_client = PaddleOCR(
-                doc_unwarping_model_dir=self._to_valid_path(config.doc_unwarping_model_dir),
-                doc_unwarping_model_name=config.doc_unwarping_model_name,
-                textline_orientation_model_dir=self._to_valid_path(config.textline_orientation_model_dir),
-                textline_orientation_model_name=config.textline_orientation_model_name,
-                text_detection_model_dir=self._to_valid_path(config.text_detection_model_dir),
-                text_detection_model_name=config.text_detection_model_name,
-                text_recognition_model_dir=self._to_valid_path(config.text_recognition_model_dir),
-                text_recognition_model_name=config.text_recognition_model_name,
+                doc_unwarping_model_dir=self._to_valid_path(self.config.doc_unwarping_model_dir),
+                doc_unwarping_model_name=self.config.doc_unwarping_model_name,
+                textline_orientation_model_dir=self._to_valid_path(self.config.textline_orientation_model_dir),
+                textline_orientation_model_name=self.config.textline_orientation_model_name,
+                text_detection_model_dir=self._to_valid_path(self.config.text_detection_model_dir),
+                text_detection_model_name=self.config.text_detection_model_name,
+                text_recognition_model_dir=self._to_valid_path(self.config.text_recognition_model_dir),
+                text_recognition_model_name=self.config.text_recognition_model_name,
 
                 use_doc_orientation_classify=False,  # 文档方向
-                use_doc_unwarping=config.use_doc_unwarping,  # 文本图像矫正
-                use_textline_orientation=config.use_textline_orientation,  # 文本行方向分类模块
-                text_det_limit_side_len=config.text_det_limit_side_len,  # 文本检测的图像边长限制
-                text_det_limit_type=config.text_det_limit_type,  # 文本检测的边长度限制类型
+                use_doc_unwarping=self.config.use_doc_unwarping,  # 文本图像矫正
+                use_textline_orientation=self.config.use_textline_orientation,  # 文本行方向分类模块
+                text_det_limit_side_len=self.config.text_det_limit_side_len,  # 文本检测的图像边长限制
+                text_det_limit_type=self.config.text_det_limit_type,  # 文本检测的边长度限制类型
 
-                text_det_thresh=config.text_det_thresh,
-                text_det_box_thresh=config.text_det_box_thresh,
-                text_det_unclip_ratio=config.text_det_unclip_ratio,
-                text_rec_score_thresh=config.text_rec_score_thresh,
+                text_det_thresh=self.config.text_det_thresh,
+                text_det_box_thresh=self.config.text_det_box_thresh,
+                text_det_unclip_ratio=self.config.text_det_unclip_ratio,
+                text_rec_score_thresh=self.config.text_rec_score_thresh,
             )
-            self._ocr_client.predict()
             info("OcrClient初始化成功")
         except Exception as e:
             info("OcrClient初始化失败, {}", e)
