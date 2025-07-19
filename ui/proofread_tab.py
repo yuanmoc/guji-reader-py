@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QDialog, QScrollArea, \
-    QFrame, QBoxLayout, QTableWidget, QTableWidgetItem
+    QFrame, QBoxLayout, QTableWidget, QTableWidgetItem, QSizePolicy
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap, QImage, QFont, QFontMetrics
+from PySide6.QtGui import QPixmap, QImage, QFont, QFontMetrics, QGuiApplication
 from core.global_state import GlobalState
 from ui.pdf_viewer import PDFViewerWidget
 from core.utils.logger import info
@@ -139,9 +139,16 @@ class ProofreadTabWidget(QWidget):
         初始化界面布局，创建按钮、状态标签、结果区等。
         """
         layout = QVBoxLayout(self)
-        self.open_btn = QPushButton("打开校对")
+        btn_row = QHBoxLayout()
+        self.open_btn = QPushButton("打开校对面板")
         self.open_btn.clicked.connect(self.open_proofread)
-        layout.addWidget(self.open_btn)
+        self.open_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        btn_row.addWidget(self.open_btn)
+        self.copy_btn = QPushButton("复制全部文本内容")
+        self.copy_btn.clicked.connect(self.copy_all_text)
+        self.copy_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        btn_row.addWidget(self.copy_btn)
+        layout.addLayout(btn_row)
         self.status_label = QLabel("状态: 等待校对")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.status_label)
@@ -149,13 +156,16 @@ class ProofreadTabWidget(QWidget):
         font = QFont()
         font.setPointSize(16)
         self.result_table = QTableWidget(self)
-        self.result_table.setColumnCount(1)
+        self.result_table.setColumnCount(3)
         self.result_table.horizontalHeader().setStretchLastSection(True)
         self.result_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.result_table.setFont(font)
-        self.result_table.setHorizontalHeaderLabels(["校对文本内容"])
-        self.result_table.cellClicked.connect(self.on_text_line_selected)
+        self.result_table.setHorizontalHeaderLabels(["↑", "↓", "校对文本内容"])
+        self.result_table.currentCellChanged.connect(self.on_text_line_selected)
         self.result_table.cellChanged.connect(self.on_text_line_edited)
+        # 设置按钮列宽为最小，第一列自适应剩余空间
+        self.result_table.setColumnWidth(0, 20)
+        self.result_table.setColumnWidth(1, 20)
         layout.addWidget(self.result_table, 1)
 
     def open_proofread(self):
@@ -204,9 +214,25 @@ class ProofreadTabWidget(QWidget):
         self.result_table.blockSignals(True)
         self.result_table.setRowCount(len(rec_texts))
         for i, text in enumerate(rec_texts):
+            # 上移按钮
+            up_btn = QPushButton("↑")
+            up_btn.clicked.connect(lambda _, row=i: self.move_row_up(row))
+            if i == 0:
+                up_btn.setEnabled(False)
+            self.result_table.setCellWidget(i, 0, up_btn)
+
+            # 下移按钮
+            down_btn = QPushButton("↓")
+            down_btn.clicked.connect(lambda _, row=i: self.move_row_down(row))
+            if i == len(rec_texts) - 1:
+                down_btn.setEnabled(False)
+            self.result_table.setCellWidget(i, 1, down_btn)
+
+            # 校对内容
             item = QTableWidgetItem(text)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
-            self.result_table.setItem(i, 0, item)
+            self.result_table.setItem(i, 2, item)
+
         self.result_table.blockSignals(False)
         self.selected_text_index = -1
         info("正在刷新校对区表格，并在PDF页面上高亮所有识别框")
@@ -220,7 +246,9 @@ class ProofreadTabWidget(QWidget):
         self.selected_text_index = row
         # 通知PDF预览器选中对应的OCR框
         if self.pdf_viewer and hasattr(self.pdf_viewer, 'overlay'):
-            info(f"用户在校对区表格中选中了第{row+1}行文本，准备高亮PDF上的对应识别框，文本内容：{self.result_table.item(row, 0).text()}")
+            item = self.result_table.item(row, 0)
+            text = item.text() if item else ''
+            info(f"用户在校对区表格中选中了第{row+1}行文本，准备高亮PDF上的对应识别框，文本内容：{text}")
             self.pdf_viewer.overlay.set_selected_index(row, False)
 
     def set_selection_from_pdf(self, row):
@@ -260,3 +288,51 @@ class ProofreadTabWidget(QWidget):
         """
         super().showEvent(event)
         self.show_ocr_text()
+
+    def copy_all_text(self):
+        # 复制全部文本到剪贴板
+        texts = []
+        for row in range(self.result_table.rowCount()):
+            item = self.result_table.item(row, 0)
+            if item:
+                texts.append(item.text())
+        all_text = "\n".join(texts)
+        QGuiApplication.clipboard().setText(all_text)
+
+    def move_row_up(self, row):
+        if row <= 0:
+            return
+        page_data = GlobalState.get_pdf_page_data()
+        ocr_data = page_data.get("ocr", {})
+        rec_texts = ocr_data.get('rec_texts', [])
+        rec_polys = ocr_data.get('rec_polys', [])
+        rec_scores = ocr_data.get('rec_scores', [])
+        # 交换内容
+        rec_texts[row-1], rec_texts[row] = rec_texts[row], rec_texts[row-1]
+        if rec_polys and len(rec_polys) == len(rec_texts):
+            rec_polys[row-1], rec_polys[row] = rec_polys[row], rec_polys[row-1]
+        if rec_scores and len(rec_scores) == len(rec_texts):
+            rec_scores[row - 1], rec_scores[row] = rec_scores[row], rec_scores[row - 1]
+        self.show_ocr_text()
+        self.result_table.selectRow(row-1)
+        GlobalState.save_cache()
+        info(f"上移第{row+1}行")
+
+    def move_row_down(self, row):
+        page_data = GlobalState.get_pdf_page_data()
+        ocr_data = page_data.get("ocr", {})
+        rec_texts = ocr_data.get('rec_texts', [])
+        rec_polys = ocr_data.get('rec_polys', [])
+        rec_scores = ocr_data.get('rec_scores', [])
+        if row >= len(rec_texts) - 1:
+            return
+        # 交换内容
+        rec_texts[row+1], rec_texts[row] = rec_texts[row], rec_texts[row+1]
+        if rec_polys and len(rec_polys) == len(rec_texts):
+            rec_polys[row+1], rec_polys[row] = rec_polys[row], rec_polys[row+1]
+        if rec_scores and len(rec_scores) == len(rec_texts):
+            rec_scores[row+1], rec_scores[row] = rec_scores[row], rec_scores[row+1]
+        self.show_ocr_text()
+        self.result_table.selectRow(row+1)
+        GlobalState.save_cache()
+        info(f"下移第{row+1}行")
