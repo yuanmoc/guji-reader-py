@@ -76,8 +76,6 @@ class NuitkaBuilder:
         self.platform = self.detect_platform()
         self.platform_args = config_manager.get_platforms_args().get(self.platform, [])
 
-        self.requirements_nuitka_file = "requirements_nuitka.txt"
-
     def detect_platform(self) -> str:
         """检测当前平台"""
         platform = sys.platform.lower()
@@ -90,31 +88,6 @@ class NuitkaBuilder:
             return "linux"
         else:
             raise ValueError(f"不支持的平台: {platform}")
-
-    def create_requirements_file(self):
-        """创建 Nuitka 专用的 requirements 文件"""
-        try:
-            # 直接使用 packages 参数
-            requirements_content = "# Nuitka 打包专用依赖\n" + "\n".join(self.packages) + "\n"
-
-            with open(self.requirements_nuitka_file, "w", encoding="utf-8") as f:
-                f.write(requirements_content)
-
-            print("📄 已创建 requirements_nuitka.txt")
-            print(f"📦 包含 {len(self.packages)} 个依赖包")
-
-        except (FileNotFoundError, json5.JSON5DecodeError):
-            print("❌ 获取packages信息出现错误")
-            exit(-1)
-
-    def clean_temp_files(self):
-        """清理临时文件"""
-        temp_files = [self.requirements_nuitka_file]
-
-        for file_path in temp_files:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                print(f"🗑️ 已清理临时文件: {file_path}")
 
     def run_command(self, cmd: List[str], description: str) -> subprocess.CompletedProcess:
         """执行命令并处理错误"""
@@ -289,8 +262,6 @@ class NuitkaBuilder:
         # 打包前修复 paddle core
         self.fix_paddle_core()
 
-        self.create_requirements_file()
-
         # 构建命令
         cmd = self.build_command()
 
@@ -299,8 +270,6 @@ class NuitkaBuilder:
 
         # 打包后还原 paddle core
         self.restore_paddle_core()
-
-        self.clean_temp_files()
 
         print(f"🎉 打包完成！")
         print(f"📦 输出文件位于 {self.output_dir}/ 目录中")

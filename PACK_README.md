@@ -51,11 +51,16 @@ rm -rf build
 ```
 对于缺少依赖和执行错误问题，在打包 pack.spec 脚本中进行处理
 
+需要更新包cv2
+```bash
+pip install --upgrade opencv-contrib-python==4.12.0.88
+```
+
 使用 pack.spec 来打包
 ```bash
 rm -rf dist 
 rm -rf build
-pyinstaller pack.spec
+pyinstaller --clean  pack.spec
 ```
 
 如果出现 MAC 启动安全问题，请执行
