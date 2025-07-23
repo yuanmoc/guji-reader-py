@@ -28,6 +28,8 @@ class GlobalState:
         :param file_path: PDF文件路径
         """
         info(f"设置全局状态-PDF文件: {file_path}")
+        # 同步保存到配置
+        cls.get_config().last_open_file = file_path
         # 加载缓存内容
         cls.load_cache()
         info(f"设置全局状态-PDF缓存已加载: {cls.get_current_pdf_basename()}")
@@ -37,9 +39,8 @@ class GlobalState:
         # 超出上限自动清理最久未访问
         while len(cls.ocr_cache) > cls.ocr_cache_max:
             cls.ocr_cache.popitem(last=False)
-        # 新增：同步保存到配置
-        cls.get_config().last_open_file = file_path
-
+        # 保存配置
+        cls.config_manager.do_save_config()
     @classmethod
     def set_page(cls, page_num):
         """

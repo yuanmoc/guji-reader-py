@@ -111,7 +111,6 @@ class MainWindow(QMainWindow):
         PDF页码切换时的回调，更新全局状态并刷新各功能区。
         :param page_num: 新页码
         """
-        GlobalState.set_page(page_num)
         self.ocr_tab.load_page_state()
         self.proofread_tab.load_page_state()
         self.punctuate_tab.load_page_state()

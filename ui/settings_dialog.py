@@ -459,7 +459,11 @@ class SettingsDialog(QDialog):
             vernacular_model_name=self.vernacular_model_edit.text().strip(),
             vernacular_system_prompt=self.vernacular_system_prompt_edit.toPlainText().strip(),
             explain_model_name=self.explain_model_edit.text().strip(),
-            explain_system_prompt=self.explain_system_prompt_edit.toPlainText().strip()
+            explain_system_prompt=self.explain_system_prompt_edit.toPlainText().strip(),
+
+            # 保持不变
+            last_open_page=self.config_manager.config.last_open_page,
+            last_open_file=self.config_manager.config.last_open_file
         )
         # 检查OCR相关字段是否有变化
         old_config = self.config_manager.config
